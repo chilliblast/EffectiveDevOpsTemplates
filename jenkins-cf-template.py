@@ -88,7 +88,7 @@ t.add_resource(ec2.SecurityGroup(
             IpProtocol="tcp",
             FromPort=ApplicationPort,
             ToPort=ApplicationPort,
-            CidrIp="PublicCidrIp",
+            CidrIp=PublicCidrIp,
         ),
     ],
 ))
