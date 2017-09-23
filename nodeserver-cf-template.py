@@ -95,8 +95,10 @@ t.add_resource(ec2.SecurityGroup(
 
 ud = Base64(Join('\n', [
     "#!/bin/bash",
+    "yum update -y",
     "yum install --enablerepo=epel -y git",
-    "pip install ansible",
+    "pip install --upgrade pip",
+    "/usr/local/bin/pip install ansible",
     AnsiblePullCmd,
     "echo '*/10 * * * * {}' > /etc/cron.d/ansible-pull".format(AnsiblePullCmd)
 ]))
