@@ -142,7 +142,7 @@
                                 "pip install ansible",
                                 "cd /tmp;git clone http://github.com/chilliblast/ansible",
                                 "/usr/local/bin/ansible-playbook /tmp/ansible/jenkins.yml -i localhost",
-                                "echo '*/10 * * * * {}' >> /etc/crond/ansible-playbook",
+                                "echo '*/10 * * * * {}' > /etc/cron.d/ansible-playbook",
                                 "/usr/local/bin/ansible-playbook /tmp/ansible/jenkins.yml -i localhost"
                             ]
                         ]

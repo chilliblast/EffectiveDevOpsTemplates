@@ -109,7 +109,7 @@ ud = Base64(Join('\n', [
 #    AnsiblePullCmd,
 #    "echo '*/10 * * * * {}' > /etc/cron.d/ansible-pull".format(AnsiblePullCmd),
     AnsiblePlayBookCmd,
-    "echo '*/10 * * * * {}' >> /etc/crond/ansible-playbook",format(AnsiblePlayBookCmd)
+    "echo '*/10 * * * * {}' > /etc/cron.d/ansible-playbook",format(AnsiblePlayBookCmd)
 ]))
 
 t.add_resource(IAMPolicy("Policy", 
