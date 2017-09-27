@@ -41,6 +41,10 @@ AnsiblePullCmd = \
 		GithubAnsibleURL,
 		ApplicationName
 )
+AnsiblePlayBookCmd = \
+	"/usr/local/bin/ansible-playbook /tmp/ansible/{}.yml -i localhost".format(
+		ApplicationName
+)
 
 PublicCidrIp = str(ip_network(get_ip()))
 
@@ -96,12 +100,16 @@ t.add_resource(ec2.SecurityGroup(
 ud = Base64(Join('\n', [
     "#!/bin/bash",
     "yum install --enablerepo=epel -y git",
+    "yum install -y gcc",
     "yum install -y libffi",
     "yum install -y libffi-devel",
     "yum install -y openssl-devel",
     "pip install ansible",
-    AnsiblePullCmd,
-    "echo '*/10 * * * * {}' > /etc/cron.d/ansible-pull".format(AnsiblePullCmd)
+    "cd /tmp;git clone http://github.com/chilliblast/ansible",
+#    AnsiblePullCmd,
+#    "echo '*/10 * * * * {}' > /etc/cron.d/ansible-pull".format(AnsiblePullCmd),
+    AnsiblePlayBookCmd,
+    "echo '*/10 * * * * {}' >> /etc/crond/ansible-playbook",format(AnsiblePlayBookCmd)
 ]))
 
 t.add_resource(IAMPolicy("Policy", 

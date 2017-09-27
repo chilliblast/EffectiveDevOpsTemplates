@@ -135,12 +135,15 @@
                             [
                                 "#!/bin/bash",
                                 "yum install --enablerepo=epel -y git",
+                                "yum install -y gcc",
                                 "yum install -y libffi",
                                 "yum install -y libffi-devel",
                                 "yum install -y openssl-devel",
                                 "pip install ansible",
-                                "/usr/local/bin/ansible-pull -U https://github.com/chilliblast/ansible jenkins.yml -i localhost",
-                                "echo '*/10 * * * * /usr/local/bin/ansible-pull -U https://github.com/chilliblast/ansible jenkins.yml -i localhost' > /etc/cron.d/ansible-pull"
+                                "cd /tmp;git clone http://github.com/chilliblast/ansible",
+                                "/usr/local/bin/ansible-playbook /tmp/ansible/jenkins.yml -i localhost",
+                                "echo '*/10 * * * * {}' >> /etc/crond/ansible-playbook",
+                                "/usr/local/bin/ansible-playbook /tmp/ansible/jenkins.yml -i localhost"
                             ]
                         ]
                     }
