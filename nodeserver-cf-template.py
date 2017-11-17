@@ -103,7 +103,7 @@ t.add_resource(InstanceProfile(
 
 t.add_resource(ec2.Instance(
     "instance",
-    ImageId="ami-a4c7edb2",
+    ImageId="ami-760aaa0f",
     InstanceType="t2.micro",
     SecurityGroups=[Ref("SecurityGroup")],
     KeyName=Ref("KeyPair"),
