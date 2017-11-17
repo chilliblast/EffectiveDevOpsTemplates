@@ -1,5 +1,4 @@
 """Generating CloudFormation template."""
-
 from ipaddress import ip_network
 
 from ipify import get_ip
@@ -15,57 +14,39 @@ from troposphere import (
     Template,
 )
 
-from troposphere.iam import ( 
-    InstanceProfile, 
-    PolicyType as IAMPolicy, 
-    Role,  
-) 
- 
-from awacs.aws import ( 
-    Action, 
-    Allow, 
-    Policy, 
-    Principal, 
-    Statement, 
-) 
- 
-from awacs.sts import AssumeRole 
+from troposphere.iam import (
+    InstanceProfile,
+    PolicyType as IAMPolicy,
+    Role,
+)
 
-ApplicationName = "nodeserver"
-ApplicationPort = "3000"
+from awacs.aws import (
+    Action,
+    Allow,
+    Policy,
+    Principal,
+    Statement,
+)
+
+from awacs.sts import AssumeRole
+
+ApplicationName = "nodeserver" 
+ApplicationPort = "3000" 
 
 GithubAccount = "chilliblast"
 GithubAnsibleURL = "https://github.com/{}/ansible".format(GithubAccount)
+
 AnsiblePullCmd = \
-	"/usr/local/bin/ansible-pull -U {} {}.yml -i localhost".format(
-		GithubAnsibleURL,
-		ApplicationName
-)
+    "/usr/local/bin/ansible-pull -U {} {}.yml -i localhost".format(
+        GithubAnsibleURL,
+        ApplicationName
+    )
 
 PublicCidrIp = str(ip_network(get_ip()))
 
 t = Template()
 
 t.add_description("Effective DevOps in AWS: HelloWorld web application")
-
-t.add_resource(Role(
-    "Role",
-    AssumeRolePolicyDocument=Policy(
-        Statement=[
-            Statement(
-                Effect=Allow,
-                Action=[AssumeRole],
-                Principal=Principal("Service", ["ec2.amazonaws.com"])
-            )
-        ]
-    )
-))
-
-t.add_resource(InstanceProfile( 
-    "InstanceProfile", 
-    Path="/", 
-    Roles=[Ref("Role")] 
-)) 
 
 t.add_parameter(Parameter(
     "KeyPair",
@@ -88,38 +69,41 @@ t.add_resource(ec2.SecurityGroup(
             IpProtocol="tcp",
             FromPort=ApplicationPort,
             ToPort=ApplicationPort,
-            CidrIp=PublicCidrIp,
+            CidrIp="0.0.0.0/0",
         ),
     ],
 ))
 
 ud = Base64(Join('\n', [
     "#!/bin/bash",
-    "yum update -y",
     "yum install --enablerepo=epel -y git",
-    "pip install --upgrade pip",
-    "/usr/local/bin/pip install ansible",
+    "pip install ansible",
     AnsiblePullCmd,
     "echo '*/10 * * * * {}' > /etc/cron.d/ansible-pull".format(AnsiblePullCmd)
 ]))
 
-t.add_resource(IAMPolicy( 
-    "Policy", 
-    PolicyName="AllowS3", 
-    PolicyDocument=Policy( 
-        Statement=[ 
-            Statement( 
-                Effect=Allow, 
-                Action=[Action("s3", "*")], 
-                Resource=["*"]) 
-        ] 
-    ), 
-    Roles=[Ref("Role")] 
-)) 
+t.add_resource(Role(
+    "Role",
+    AssumeRolePolicyDocument=Policy(
+        Statement=[
+            Statement(
+                Effect=Allow,
+                Action=[AssumeRole],
+                Principal=Principal("Service", ["ec2.amazonaws.com"])
+            )
+        ]
+    )
+))
+
+t.add_resource(InstanceProfile(
+    "InstanceProfile",
+    Path="/",
+    Roles=[Ref("Role")]
+))
 
 t.add_resource(ec2.Instance(
     "instance",
-    ImageId="ami-ebd02392",
+    ImageId="ami-a4c7edb2",
     InstanceType="t2.micro",
     SecurityGroups=[Ref("SecurityGroup")],
     KeyName=Ref("KeyPair"),
@@ -142,4 +126,4 @@ t.add_output(Output(
     ]),
 ))
 
-print (t.to_json())
+print t.to_json()
