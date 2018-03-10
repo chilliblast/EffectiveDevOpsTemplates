@@ -13,13 +13,25 @@ from troposphere import (
     Parameter,
     Ref,
     Template,
+    elasticloadbalancing as elb,
+)
+
+from troposphere.autoscaling import ( 
+    AutoScalingGroup,
+    LaunchConfiguration,
+    ScalingPolicy, 
 )
 
 from troposphere.iam import ( 
     InstanceProfile, 
     PolicyType as IAMPolicy, 
     Role,  
-) 
+)
+
+from troposphere.cloudwatch import ( 
+    Alarm, 
+    MetricDimension, 
+)  
  
 from awacs.aws import ( 
     Action, 
@@ -74,6 +86,110 @@ t.add_parameter(Parameter(
     ConstraintDescription="must be the name of an existing EC2 KeyPair.",
 ))
 
+t.add_parameter(Parameter( 
+    "VpcId", 
+    Type="AWS::EC2::VPC::Id", 
+    Description="VPC" 
+))
+
+t.add_parameter(Parameter( 
+    "PublicSubnet", 
+    Description="PublicSubnet", 
+    Type="List<AWS::EC2::Subnet::Id>", 
+    ConstraintDescription="PublicSubnet" 
+))
+
+t.add_parameter(Parameter( 
+    "ScaleCapacity", 
+    Default="3", 
+    Type="String", 
+    Description="Number servers to run", 
+))
+
+t.add_parameter(Parameter( 
+    'InstanceType', 
+    Type='String', 
+    Description='WebServer EC2 instance type', 
+    Default='t2.micro', 
+    AllowedValues=[ 
+        't2.micro', 
+        't2.small', 
+        't2.medium', 
+        't2.large', 
+    ], 
+    ConstraintDescription='must be a valid EC2 T2 instance type.', 
+))
+
+t.add_resource(ec2.SecurityGroup( 
+    "LoadBalancerSecurityGroup", 
+    GroupDescription="Web load balancer security group.", 
+    VpcId=Ref("VpcId"), 
+    SecurityGroupIngress=[ 
+        ec2.SecurityGroupRule( 
+            IpProtocol="tcp", 
+            FromPort="3000", 
+            ToPort="3000", 
+            CidrIp=PublicCidrIp,
+        ), 
+    ], 
+))
+
+t.add_resource(elb.LoadBalancer( 
+    "LoadBalancer",
+    Scheme="internet-facing",  
+    Listeners=[ 
+        elb.Listener( 
+            LoadBalancerPort="3000", 
+            InstancePort="3000", 
+            Protocol="HTTP", 
+            InstanceProtocol="HTTP" 
+        ), 
+    ],
+    HealthCheck=elb.HealthCheck( 
+        Target="HTTP:3000/", 
+        HealthyThreshold="5", 
+        UnhealthyThreshold="2", 
+        Interval="20", 
+        Timeout="15", 
+    ), 
+    ConnectionDrainingPolicy=elb.ConnectionDrainingPolicy( 
+        Enabled=True, 
+        Timeout=10, 
+    ),
+    CrossZone=True,
+    Subnets=Ref("PublicSubnet"), 
+    SecurityGroups=[Ref("LoadBalancerSecurityGroup")], 
+))
+
+t.add_resource(LaunchConfiguration( 
+    "LaunchConfiguration", 
+    UserData=ud, 
+    ImageId="ami-a4c7edb2", 
+    KeyName=Ref("KeyPair"),
+    SecurityGroups=[Ref("SecurityGroup")], 
+    InstanceType=Ref("InstanceType"), 
+    IamInstanceProfile=Ref("InstanceProfile"), 
+))
+
+t.add_resource(AutoScalingGroup( 
+    "AutoscalingGroup",
+    DesiredCapacity=Ref("ScaleCapacity"), 
+    LaunchConfigurationName=Ref("LaunchConfiguration"),
+    MinSize=2, 
+    MaxSize=5,
+    LoadBalancerNames=[Ref("LoadBalancer")], 
+    VPCZoneIdentifier=Ref("PublicSubnet"), 
+))
+
+t.add_output(Output( 
+    "WebUrl", 
+    Description="Application endpoint", 
+    Value=Join("", [ 
+        "http://", GetAtt("LoadBalancer", "DNSName"), 
+        ":", ApplicationPort 
+    ]), 
+))
+
 t.add_resource(ec2.SecurityGroup(
     "SecurityGroup",
     GroupDescription="Allow SSH and TCP/{} access".format(ApplicationPort),
@@ -91,6 +207,7 @@ t.add_resource(ec2.SecurityGroup(
             CidrIp=PublicCidrIp,
         ),
     ],
+	VpcId=Ref("VpcId"),
 ))
 
 ud = Base64(Join('\n', [
@@ -115,31 +232,59 @@ t.add_resource(IAMPolicy(
         ] 
     ), 
     Roles=[Ref("Role")] 
+))
+
+t.add_resource(ScalingPolicy( 
+    "ScaleDownPolicy", 
+    ScalingAdjustment="-1", 
+    AutoScalingGroupName=Ref("AutoscalingGroup"), 
+    AdjustmentType="ChangeInCapacity", 
 )) 
-
-t.add_resource(ec2.Instance(
-    "instance",
-    ImageId="ami-ebd02392",
-    InstanceType="t2.micro",
-    SecurityGroups=[Ref("SecurityGroup")],
-    KeyName=Ref("KeyPair"),
-    UserData=ud,
-    IamInstanceProfile=Ref("InstanceProfile"),
+ 
+t.add_resource(ScalingPolicy( 
+    "ScaleUpPolicy", 
+    ScalingAdjustment="1", 
+    AutoScalingGroupName=Ref("AutoscalingGroup"), 
+    AdjustmentType="ChangeInCapacity", 
 ))
 
-t.add_output(Output(
-    "InstancePublicIp",
-    Description="Public IP of our instance.",
-    Value=GetAtt("instance", "PublicIp"),
+t.add_resource(Alarm( 
+    "CPUTooLow", 
+    AlarmDescription="Alarm if CPU too low",
+    Namespace="AWS/EC2", 
+    MetricName="CPUUtilization",
+    Dimensions=[ 
+        MetricDimension( 
+            Name="AutoScalingGroupName", 
+            Value=Ref("AutoscalingGroup") 
+        ), 
+    ], 
+    Statistic="Average", 
+    Period="60", 
+    EvaluationPeriods="1",
+    Threshold="30", 
+    ComparisonOperator="LessThanThreshold",
+    AlarmActions=[Ref("ScaleDownPolicy")], 
 ))
 
-t.add_output(Output(
-    "WebUrl",
-    Description="Application endpoint",
-    Value=Join("", [
-        "http://", GetAtt("instance", "PublicDnsName"),
-        ":", ApplicationPort
-    ]),
-))
+t.add_resource(Alarm( 
+    "CPUTooHigh", 
+    AlarmDescription="Alarm if CPU too high", 
+    Namespace="AWS/EC2", 
+    MetricName="CPUUtilization", 
+    Dimensions=[ 
+        MetricDimension( 
+            Name="AutoScalingGroupName", 
+            Value=Ref("AutoscalingGroup") 
+        ), 
+    ], 
+    Statistic="Average", 
+    Period="60", 
+    EvaluationPeriods="1", 
+    Threshold="60", 
+    ComparisonOperator="GreaterThanThreshold", 
+    AlarmActions=[Ref("ScaleUpPolicy"), ], 
+    InsufficientDataActions=[Ref("ScaleUpPolicy")], 
+)) 
 
 print (t.to_json())
