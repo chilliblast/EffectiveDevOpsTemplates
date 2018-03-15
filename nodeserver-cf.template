@@ -1,15 +1,6 @@
 {
     "Description": "Effective DevOps in AWS: HelloWorld web application",
     "Outputs": {
-        "InstancePublicIp": {
-            "Description": "Public IP of our instance.",
-            "Value": {
-                "Fn::GetAtt": [
-                    "instance",
-                    "PublicIp"
-                ]
-            }
-        },
         "WebUrl": {
             "Description": "Application endpoint",
             "Value": {
@@ -19,8 +10,8 @@
                         "http://",
                         {
                             "Fn::GetAtt": [
-                                "instance",
-                                "PublicDnsName"
+                                "LoadBalancer",
+                                "DNSName"
                             ]
                         },
                         ":",
@@ -31,13 +22,117 @@
         }
     },
     "Parameters": {
+        "InstanceType": {
+            "AllowedValues": [
+                "t2.micro",
+                "t2.small",
+                "t2.medium",
+                "t2.large"
+            ],
+            "ConstraintDescription": "must be a valid EC2 T2 instance type.",
+            "Default": "t2.micro",
+            "Description": "WebServer EC2 instance type",
+            "Type": "String"
+        },
         "KeyPair": {
             "ConstraintDescription": "must be the name of an existing EC2 KeyPair.",
             "Description": "Name of an existing EC2 KeyPair to SSH",
             "Type": "AWS::EC2::KeyPair::KeyName"
+        },
+        "PublicSubnet": {
+            "ConstraintDescription": "PublicSubnet",
+            "Description": "PublicSubnet",
+            "Type": "List<AWS::EC2::Subnet::Id>"
+        },
+        "ScaleCapacity": {
+            "Default": "3",
+            "Description": "Number servers to run",
+            "Type": "String"
+        },
+        "VpcId": {
+            "Description": "VPC",
+            "Type": "AWS::EC2::VPC::Id"
         }
     },
     "Resources": {
+        "AutoscalingGroup": {
+            "Properties": {
+                "DesiredCapacity": {
+                    "Ref": "ScaleCapacity"
+                },
+                "LaunchConfigurationName": {
+                    "Ref": "LaunchConfiguration"
+                },
+                "LoadBalancerNames": [
+                    {
+                        "Ref": "LoadBalancer"
+                    }
+                ],
+                "MaxSize": 5,
+                "MinSize": 2,
+                "VPCZoneIdentifier": {
+                    "Ref": "PublicSubnet"
+                }
+            },
+            "Type": "AWS::AutoScaling::AutoScalingGroup"
+        },
+        "CPUTooHigh": {
+            "Properties": {
+                "AlarmActions": [
+                    {
+                        "Ref": "ScaleUpPolicy"
+                    }
+                ],
+                "AlarmDescription": "Alarm if CPU too high",
+                "ComparisonOperator": "GreaterThanThreshold",
+                "Dimensions": [
+                    {
+                        "Name": "AutoScalingGroupName",
+                        "Value": {
+                            "Ref": "AutoscalingGroup"
+                        }
+                    }
+                ],
+                "EvaluationPeriods": "1",
+                "InsufficientDataActions": [
+                    {
+                        "Ref": "ScaleUpPolicy"
+                    }
+                ],
+                "MetricName": "CPUUtilization",
+                "Namespace": "AWS/EC2",
+                "Period": "60",
+                "Statistic": "Average",
+                "Threshold": "60"
+            },
+            "Type": "AWS::CloudWatch::Alarm"
+        },
+        "CPUTooLow": {
+            "Properties": {
+                "AlarmActions": [
+                    {
+                        "Ref": "ScaleDownPolicy"
+                    }
+                ],
+                "AlarmDescription": "Alarm if CPU too low",
+                "ComparisonOperator": "LessThanThreshold",
+                "Dimensions": [
+                    {
+                        "Name": "AutoScalingGroupName",
+                        "Value": {
+                            "Ref": "AutoscalingGroup"
+                        }
+                    }
+                ],
+                "EvaluationPeriods": "1",
+                "MetricName": "CPUUtilization",
+                "Namespace": "AWS/EC2",
+                "Period": "60",
+                "Statistic": "Average",
+                "Threshold": "30"
+            },
+            "Type": "AWS::CloudWatch::Alarm"
+        },
         "InstanceProfile": {
             "Properties": {
                 "Path": "/",
@@ -48,6 +143,91 @@
                 ]
             },
             "Type": "AWS::IAM::InstanceProfile"
+        },
+        "LaunchConfiguration": {
+            "Properties": {
+                "IamInstanceProfile": {
+                    "Ref": "InstanceProfile"
+                },
+                "ImageId": "ami-38c55341",
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "KeyName": {
+                    "Ref": "KeyPair"
+                },
+                "SecurityGroups": [
+                    {
+                        "Ref": "SecurityGroup"
+                    }
+                ],
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "\n",
+                            [
+                                "#!/bin/bash",
+                                "yum install --enablerepo=epel -y git",
+                                "pip install ansible",
+                                "/usr/local/bin/ansible-pull -U https://github.com/chilliblast/ansible nodeserver.yml -i localhost",
+                                "echo '*/10 * * * * /usr/local/bin/ansible-pull -U https://github.com/chilliblast/ansible nodeserver.yml -i localhost' > /etc/cron.d/ansible-pull"
+                            ]
+                        ]
+                    }
+                }
+            },
+            "Type": "AWS::AutoScaling::LaunchConfiguration"
+        },
+        "LoadBalancer": {
+            "Properties": {
+                "ConnectionDrainingPolicy": {
+                    "Enabled": true,
+                    "Timeout": 10
+                },
+                "CrossZone": "true",
+                "HealthCheck": {
+                    "HealthyThreshold": "5",
+                    "Interval": "20",
+                    "Target": "HTTP:3000/",
+                    "Timeout": "15",
+                    "UnhealthyThreshold": "2"
+                },
+                "Listeners": [
+                    {
+                        "InstancePort": "3000",
+                        "InstanceProtocol": "HTTP",
+                        "LoadBalancerPort": "3000",
+                        "Protocol": "HTTP"
+                    }
+                ],
+                "Scheme": "internet-facing",
+                "SecurityGroups": [
+                    {
+                        "Ref": "LoadBalancerSecurityGroup"
+                    }
+                ],
+                "Subnets": {
+                    "Ref": "PublicSubnet"
+                }
+            },
+            "Type": "AWS::ElasticLoadBalancing::LoadBalancer"
+        },
+        "LoadBalancerSecurityGroup": {
+            "Properties": {
+                "GroupDescription": "Web load balancer security group.",
+                "SecurityGroupIngress": [
+                    {
+                        "CidrIp": "34.241.78.151/32",
+                        "FromPort": "3000",
+                        "IpProtocol": "tcp",
+                        "ToPort": "3000"
+                    }
+                ],
+                "VpcId": {
+                    "Ref": "VpcId"
+                }
+            },
+            "Type": "AWS::EC2::SecurityGroup"
         },
         "Policy": {
             "Properties": {
@@ -93,59 +273,48 @@
             },
             "Type": "AWS::IAM::Role"
         },
+        "ScaleDownPolicy": {
+            "Properties": {
+                "AdjustmentType": "ChangeInCapacity",
+                "AutoScalingGroupName": {
+                    "Ref": "AutoscalingGroup"
+                },
+                "ScalingAdjustment": "-1"
+            },
+            "Type": "AWS::AutoScaling::ScalingPolicy"
+        },
+        "ScaleUpPolicy": {
+            "Properties": {
+                "AdjustmentType": "ChangeInCapacity",
+                "AutoScalingGroupName": {
+                    "Ref": "AutoscalingGroup"
+                },
+                "ScalingAdjustment": "1"
+            },
+            "Type": "AWS::AutoScaling::ScalingPolicy"
+        },
         "SecurityGroup": {
             "Properties": {
                 "GroupDescription": "Allow SSH and TCP/3000 access",
                 "SecurityGroupIngress": [
                     {
-                        "CidrIp": "82.132.221.59/32",
+                        "CidrIp": "34.241.78.151/32",
                         "FromPort": "22",
                         "IpProtocol": "tcp",
                         "ToPort": "22"
                     },
                     {
-                        "CidrIp": "82.132.221.59/32",
+                        "CidrIp": "34.241.78.151/32",
                         "FromPort": "3000",
                         "IpProtocol": "tcp",
                         "ToPort": "3000"
                     }
-                ]
-            },
-            "Type": "AWS::EC2::SecurityGroup"
-        },
-        "instance": {
-            "Properties": {
-                "IamInstanceProfile": {
-                    "Ref": "InstanceProfile"
-                },
-                "ImageId": "ami-ebd02392",
-                "InstanceType": "t2.micro",
-                "KeyName": {
-                    "Ref": "KeyPair"
-                },
-                "SecurityGroups": [
-                    {
-                        "Ref": "SecurityGroup"
-                    }
                 ],
-                "UserData": {
-                    "Fn::Base64": {
-                        "Fn::Join": [
-                            "\n",
-                            [
-                                "#!/bin/bash",
-                                "yum update -y",
-                                "yum install --enablerepo=epel -y git",
-                                "pip install --upgrade pip",
-                                "/usr/bin/pip install ansible",
-                                "/usr/local/bin/ansible-pull -U https://github.com/chilliblast/ansible nodeserver.yml -i localhost",
-                                "echo '*/10 * * * * /usr/local/bin/ansible-pull -U https://github.com/chilliblast/ansible nodeserver.yml -i localhost' > /etc/cron.d/ansible-pull"
-                            ]
-                        ]
-                    }
+                "VpcId": {
+                    "Ref": "VpcId"
                 }
             },
-            "Type": "AWS::EC2::Instance"
+            "Type": "AWS::EC2::SecurityGroup"
         }
     }
 }

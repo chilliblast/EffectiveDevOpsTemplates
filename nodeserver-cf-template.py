@@ -45,7 +45,7 @@ from awacs.sts import AssumeRole
 ApplicationName = "nodeserver"
 ApplicationPort = "3000"
 
-GithubAccount = "EffectiveDevOpsWithAWS"
+GithubAccount = "chilliblast"
 GithubAnsibleURL = "https://github.com/{}/ansible".format(GithubAccount)
 
 AnsiblePullCmd = \
